@@ -98,3 +98,9 @@ h1 {
    background-color: bisque;
     padding: 10px;
 }
+#content-warnings div.warn {
+   margin: 10px;
+   border-color: chocolate;
+   border-width: 2px;
+   border-style: solid;
+}

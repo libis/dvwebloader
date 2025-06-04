@@ -227,16 +227,28 @@ function initTranslation() {
 function initSpanTxt(htmlId, key) {
     $('#'+htmlId).text(getLocalizedString(dvLocale, key));
 }
-function addMessage(type, key, ...keyArgs) {
+
+function formatMessage(key, keyArgs) {
     let msg = getLocalizedString(dvLocale, key);
     
     if(keyArgs && Array.isArray(keyArgs)) {
         for (var i = 0; i < keyArgs.length; i++) {
-            msg = msg.replaceAll('{'+i+'}',keyArgs[i]);
+            msg = msg.replaceAll('{'+i+'}', keyArgs[i]);
         }
     }
+    return msg;
+}
+
+function addMessage(type, key, ...keyArgs) {
+    let msg = formatMessage(key, keyArgs);
     $('#messages').html('')
         .append($('<div/>').addClass(type).html(msg));
+}
+
+function addContentWarning(key, ...keyArgs) {
+    let msg = formatMessage(key, keyArgs);
+    $('#content-warnings').html('')
+        .append($('<div/>').addClass('warn').html(msg));
 }
 
 async function populatePageMetadata(data) {
@@ -266,52 +278,98 @@ async function populatePageMetadata(data) {
 }
 
 async function retrieveDatasetInfo() {
-    $.ajax({
-        url: siteUrl + '/api/datasets/:persistentId/versions/:latest?persistentId=' + datasetPid,
-        headers: { "X-Dataverse-key": apiKey },
-        type: 'GET',
-        context: this,
-        cache: false,
-        dataType: "json",
-        processData: false,
-        success: function(body, statusText, jqXHR) {
-            console.log(body);
-            let data = body.data;
-            console.log(data);
-            populatePageMetadata(data);
-            if (data.files !== null) {
-                existingFiles = {};
-                convertedFileNameMap = {};
-                for (let i = 0; i < data.files.length; i++) {
-                    let entry = data.files[i];
-                    let df = entry.dataFile;
-                    let convertedFile = false;
-                    if (("originalFileFormat" in df)
-                        && (!df.contentType === df.originalFileFormat)) {
-                        console.log("The file named " + df.getString("filename")
-                            + " on the server was created by Dataverse's ingest process from an original uploaded file");
-                        convertedFile = true;
-                    }
-                    let filepath = df.filename;
-                    if ('directoryLabel' in entry) {
-                        filepath = entry.directoryLabel + '/' + filepath;
-                    }
-                    console.log("Storing: " + filepath);
-                    existingFiles[filepath] = df.checksum;
-                    if (convertedFile) {
-                        convertedFileNameMap[removeExtension(filepath)] = filepath;
-                    }
+    try {
+        // First, check for dataset locks
+        const locksResponse = await $.ajax({
+            url: siteUrl + '/api/datasets/:persistentId/locks?persistentId=' + datasetPid,
+            headers: { "X-Dataverse-key": apiKey },
+            type: 'GET',
+            cache: false,
+            dataType: "json"
+        });
+
+        let isLockedInReview = false;
+        if (locksResponse.data && locksResponse.data.length > 0) {
+            isLockedInReview = locksResponse.data.some(lock => lock.lockType === "InReview");
+        }
+
+        // If locked but not InReview, disable upload
+        if (locksResponse.data && locksResponse.data.length > 0 && !isLockedInReview) {
+            addMessage('error', 'msgDatasetLocked');
+            disableUploadFunctionality();
+            return;
+        }
+
+        // If locked InReview, check user permissions
+        if (isLockedInReview) {
+            const permissionsResponse = await $.ajax({
+                url: siteUrl + '/api/datasets/:persistentId/userPermissions?persistentId=' + datasetPid,
+                headers: { "X-Dataverse-key": apiKey },
+                type: 'GET',
+                cache: false,
+                dataType: "json"
+            });
+
+            if (!permissionsResponse.data || !permissionsResponse.data.canPublishDataset) {
+                addMessage('error', 'msgDatasetLockedInReview');
+                disableUploadFunctionality();
+                return;
+            }
+        }
+
+        // If not locked or user has permission, proceed with retrieving dataset info
+        const datasetResponse = await $.ajax({
+            url: siteUrl + '/api/datasets/:persistentId/versions/:latest?persistentId=' + datasetPid,
+            headers: { "X-Dataverse-key": apiKey },
+            type: 'GET',
+            cache: false,
+            dataType: "json"
+        });
+
+        console.log(datasetResponse);
+        let data = datasetResponse.data;
+        console.log(data);
+
+        populatePageMetadata(data);
+        if (data.files !== null) {
+            existingFiles = {};
+            convertedFileNameMap = {};
+            for (let i = 0; i < data.files.length; i++) {
+                let entry = data.files[i];
+                let df = entry.dataFile;
+                let convertedFile = false;
+                if (("originalFileFormat" in df)
+                    && (!(df.contentType === df.originalFileFormat))) {
+                    console.log("The file named " + df.filename
+                        + " on the server was created by Dataverse's ingest process from an original uploaded file");
+                    convertedFile = true;
+                }
+                let filepath = df.filename;
+                if ('directoryLabel' in entry) {
+                    filepath = entry.directoryLabel + '/' + filepath;
+                }
+                console.log("Storing: " + filepath);
+                existingFiles[filepath] = df.checksum;
+                if (convertedFile) {
+                    convertedFileNameMap[removeExtension(filepath)] = filepath;
                 }
             }
-            $('#files').prop('disabled', false);
-            addMessage('info', 'msgReadyToStart');
-        },
-        error: function(jqXHR, textStatus, errorThrown) {
-            console.log('Failure: ' + jqXHR.status);
-            console.log('Failure: ' + errorThrown);
         }
-    });
+        $('#files').prop('disabled', false);
+        addMessage('info', 'msgReadyToStart');
+    } catch (error) {
+        console.log('Error:', error);
+        addMessage('error', 'msgErrorRetrievingDataset');
+    }
 }
+
+function disableUploadFunctionality() {
+    $('#files').prop('disabled', true);
+    $('.file-selection-buttons').hide();
+    $('label.button').hide();
+    // Disable any other relevant UI elements
+}
+
 //Not used in dvwebloader
 function setupDirectUpload(enabled) {
     if (enabled) {
@@ -699,7 +757,7 @@ var fileUpload = class fileUploadClass {
 }
     ;
 function removeExtension(name) {
-    let extIndex = name.indexOf(".");
+    let extIndex = name.lastIndexOf(".");
     let sepIndex = name.indexOf('/');
     if (extIndex > sepIndex) {
         return name.substring(0, extIndex);
@@ -719,8 +777,8 @@ function queueFileForDirectUpload(file) {
     let path =origPath.substring(0, origPath.length - file.name.length);
     let badPath = (path.match(/^[\w\-\.\\\/ ]*$/)===null);
     if(badPath) {
-      if($('.warn').length==0) {
-        addMessage('warn', 'msgRequiredPathOrFileNameChange');
+      if($('#content-warnings.warn').length==0) {
+        addContentWarning('msgRequiredPathOrFileNameChange');
       }
       //Munge path according to rules
       path = path.replace(/[^\w\-\.\\\/ ]+/g,'_');
@@ -753,8 +811,8 @@ function queueFileForDirectUpload(file) {
     }
     let badChars = !(fUpload.file.name.match(/[:<>;#\/"*|?\\]/)===null);
     if(badChars) {
-      if($('.warn').length==0) {
-          addMessage('warn', 'msgRequiredPathOrFileNameChange');
+      if($('#content-warnings.warn').length==0) {
+          addContentWarning('msgRequiredPathOrFileNameChange');
       }
     }
     row.append($('<input/>').prop('type', 'checkbox').prop('id', 'file_' + fUpload.id).prop('checked', send));
@@ -864,7 +922,6 @@ async function uploadFileDirectly(urls, storageId, filesize) {
         upload.doUpload();
     }
 }
-
 
 
 
@@ -1136,7 +1193,7 @@ function getChecksum(blob, cbProgress) {
                 checksumAlg = CryptoJS.algo.SHA512.create();
                 break;
             default:
-                console.log('$(checksumAlgName) is not supported, using MD5 as the checksumAlg checksum Algorithm');
+                console.log('$(checksumAlgName) is not supported, using MD5 as the checksum Algorithm');
                 checksumAlg = CryptoJS.algo.MD5.create();
         }
         readChunked(blob, (chunk, offs, total) => {
