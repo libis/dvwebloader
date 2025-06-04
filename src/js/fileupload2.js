@@ -227,25 +227,26 @@ function initTranslation() {
 function initSpanTxt(htmlId, key) {
     $('#'+htmlId).text(getLocalizedString(dvLocale, key));
 }
-function addMessage(type, key, ...keyArgs) {
+
+function formatMessage(key, keyArgs) {
     let msg = getLocalizedString(dvLocale, key);
     
     if(keyArgs && Array.isArray(keyArgs)) {
         for (var i = 0; i < keyArgs.length; i++) {
-            msg = msg.replaceAll('{'+i+'}',keyArgs[i]);
+            msg = msg.replaceAll('{'+i+'}', keyArgs[i]);
         }
     }
+    return msg;
+}
+
+function addMessage(type, key, ...keyArgs) {
+    let msg = formatMessage(key, keyArgs);
     $('#messages').html('')
         .append($('<div/>').addClass(type).html(msg));
 }
+
 function addContentWarning(key, ...keyArgs) {
-    let msg = getLocalizedString(dvLocale, key);
-    
-    if(keyArgs && Array.isArray(keyArgs)) {
-        for (var i = 0; i < keyArgs.length; i++) {
-            msg = msg.replaceAll('{'+i+'}',keyArgs[i]);
-        }
-    }
+    let msg = formatMessage(key, keyArgs);
     $('#content-warnings').html('')
         .append($('<div/>').addClass('warn').html(msg));
 }
