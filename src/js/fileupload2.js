@@ -63,9 +63,7 @@ $(document).ready(function() {
     directUploadEnabled = true;
     initTranslation();
     addMessage('info', 'msgGettingDatasetInfo');
-    // Default to MD5; if the API call fails (e.g., CORS), we still proceed without errors.
-    checksumAlgName = "MD5";
-    fetch(siteUrl + "/api/files/fixityAlgorithm", { mode: 'cors' })
+    fetch(siteUrl + "/api/files/fixityAlgorithm")
         .then((response) => {
             if (!response.ok) {
                 console.log("Did not get fixityAlgorithm from Dataverse, using MD5");
@@ -73,16 +71,13 @@ $(document).ready(function() {
             } else {
                 return response.json();
             }
-        })
-        .then(checksumAlgJson => {
-            if (checksumAlgJson && checksumAlgJson.data && checksumAlgJson.data.message) {
+        }).then(checksumAlgJson => {
+            checksumAlgName = "MD5";
+            if (checksumAlgJson != null) {
                 checksumAlgName = checksumAlgJson.data.message;
             }
         })
-        .catch((err) => {
-            console.log("Unable to retrieve fixityAlgorithm (possibly due to CORS). Defaulting to MD5.", err);
-        })
-        .finally(() => {
+        .then(() => {
             var head = document.getElementsByTagName('head')[0];
             var js = document.createElement("script");
             js.type = "text/javascript";
